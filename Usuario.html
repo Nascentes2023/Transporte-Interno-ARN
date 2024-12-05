@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Acompanhamento do Ônibus</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #f0f0f0;
+    }
+    h1 {
+      color: #0056b3;
+    }
+    #map {
+      width: 90%;
+      height: 500px;
+      margin: 20px 0;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+    }
+    .popup {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      display: none;
+    }
+    #notifyButton {
+      padding: 15px 30px;
+      background-color: #0056b3;
+      color: white;
+      font-size: 18px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    #notifyButton:hover {
+      background-color: #003d80;
+    }
+  </style>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+  <!-- Google Maps -->
+  <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCq1y3mAzmSSzDrdi6UDukRblU4naEH-lU&callback=initMap&libraries=geometry">
+  </script>
+</head>
+<body>
+  <h1>Acompanhamento do Ônibus</h1>
+  <div id="map"></div>
+  <div id="popup" class="popup">O ônibus está chegando!</div>
+
+  <!-- Botão para iniciar monitoramento -->
+  <button id="notifyButton">Avise-me quando o ônibus chegar</button>
+
+  <script>
+    // Configuração do Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyC7SXI2hJ2GzrxIuig8UqX__Ml0rikst30",
+      authDomain: "transporte-interno.firebaseapp.com",
+      databaseURL: "https://transporte-interno-default-rtdb.firebaseio.com",
+      projectId: "transporte-interno",
+      storageBucket: "transporte-interno.firebasestorage.app",
+      messagingSenderId: "1034071655179",
+      appId: "1:1034071655179:web:1c24813857f28fd31d980e",
+      measurementId: "G-HCNRHLMFDT"
+    };
+
+    // Inicializar Firebase
+    const app = firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    let map;
+    let userMarker;
+    let userLocation;
+    let circle;
+    const markers = {};  // Armazenar marcadores dos motoristas
+    let isMonitoring = false; // Controle para verificar se a monitoração está ativada
+
+    // Função para inicializar o mapa
+    function initMap() {
+      const defaultLocation = { lat: -19.908948, lng: -43.938896 };  // Localização padrão
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: defaultLocation,
+        zoom: 14
+      });
+
+      // Posição inicial do usuário (verificação depois)
+      navigator.geolocation.getCurrentPosition(function (position) {
+        userLocation = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+
+        // Criando marcador para o usuário
+        userMarker = new google.maps.Marker({
+          position: userLocation,
+          map: map,
+          title: "Sua Localização"
+        });
+
+        map.setCenter(userLocation);
+
+        // Criar o círculo de 50 metros ao redor da localização do usuário
+        circle = new google.maps.Circle({
+          map: map,
+          center: userLocation,
+          radius: 50,  // 50 metros
+          strokeColor: "#FF0000",
+          strokeOpacity: 0.8,
+          strokeWeight: 2,
+          fillColor: "#FF0000",
+          fillOpacity: 0.35
+        });
+      });
+    }
+
+    // Monitorar a localização dos motoristas no Firebase
+    function monitorMotoristaLocation() {
+      const locationsRef = database.ref("locations");
+
+      locationsRef.on("value", (snapshot) => {
+        const data = snapshot.val();
+        console.log("Dados recebidos do Firebase:", data); // Para debug
+
+        if (data) {
+          Object.keys(data).forEach((nomeMotorista) => {
+            const location = data[nomeMotorista];
+            if (location.latitude && location.longitude) {
+              const position = { lat: location.latitude, lng: location.longitude };
+              updateMotoristaMarker(nomeMotorista, position);
+            } else {
+              console.warn(`Coordenadas inválidas para ${nomeMotorista}:`, location);
+            }
+          });
+        } else {
+          console.warn("Nenhuma localização encontrada no Firebase.");
+        }
+      });
+    }
+
+    // Atualizar o marcador do motorista no mapa
+    function updateMotoristaMarker(nomeMotorista, position) {
+      const busIcon = {
+        url: "onibuspreto.png", // Caminho do ícone local
+        scaledSize: new google.maps.Size(40, 40),  // Tamanho do ícone
+        origin: new google.maps.Point(0, 0),
+        anchor: new google.maps.Point(20, 20)
+      };
+
+      // Verificar se o motorista já tem um marcador
+      if (!markers[nomeMotorista]) {
+        markers[nomeMotorista] = new google.maps.Marker({
+          position: position,
+          map: map,
+          title: nomeMotorista,
+          icon: busIcon
+        });
+      } else {
+        markers[nomeMotorista].setPosition(position);
+      }
+
+      // Centraliza o mapa na localização do motorista
+      map.setCenter(position);
+
+      if (isMonitoring) {
+        checkDistance(); // Verifica a distância se a monitoração estiver ativada
+      }
+    }
+
+    // Calcular a distância entre o usuário e o motorista
+    function checkDistance() {
+      if (userLocation && markers) {
+        Object.keys(markers).forEach((nomeMotorista) => {
+          const busPosition = markers[nomeMotorista].getPosition();
+          if (busPosition) {
+            const userLatLng = new google.maps.LatLng(userLocation.lat, userLocation.lng);
+            const busLatLng = new google.maps.LatLng(busPosition.lat(), busPosition.lng());
+
+            const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, busLatLng);
+
+            // Se a distância for menor que 50 metros, mostrar o pop-up e tocar o áudio
+            if (distance <= 50) {
+              showPopup();
+              sendNotification();
+              playAudio(); // Reproduzir o áudio
+            } else {
+              hidePopup();
+            }
+          }
+        });
+      }
+    }
+
+    // Mostrar o pop-up
+    function showPopup() {
+      document.getElementById("popup").style.display = "block";
+    }
+
+    // Esconder o pop-up
+    function hidePopup() {
+      document.getElementById("popup").style.display = "none";
+    }
+
+    // Enviar notificação push
+    function sendNotification() {
+      if (Notification.permission === "granted") {
+        new Notification("O ônibus está chegando!", {
+          body: "O ônibus está a menos de 50 metros de você.",
+          icon: "https://via.placeholder.com/50",
+        });
+      }
+    }
+
+    // Função para reproduzir áudio
+    function playAudio() {
+      const audio = new Audio('Alerta.mp3'); // Substitua pelo caminho do arquivo de áudio
+      audio.play();
+    }
+
+    // Solicitar permissão para notificações push
+    if (Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+
+    // Ativar o monitoramento ao clicar no botão
+    document.getElementById('notifyButton').addEventListener('click', function() {
+      if (!isMonitoring) {
+        isMonitoring = true; // Inicia a monitoração
+        monitorMotoristaLocation(); // Começa a monitorar a localização do ônibus
+        alert('Agora você será notificado quando o ônibus estiver chegando!');
+      }
+    });
+  </script>
+</body>
+</html>

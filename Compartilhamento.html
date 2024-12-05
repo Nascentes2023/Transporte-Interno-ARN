@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solicitar Geolocalização</title>
+    <script type="module">
+        // Importando Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-database.js";
+
+        // Configuração do Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyC7SXI2hJ2GzrxIuig8UqX__Ml0rikst30",
+            authDomain: "transporte-interno.firebaseapp.com",
+            databaseURL: "https://transporte-interno-default-rtdb.firebaseio.com",
+            projectId: "transporte-interno",
+            storageBucket: "transporte-interno.firebasestorage.app",
+            messagingSenderId: "1034071655179",
+            appId: "1:1034071655179:web:1c24813857f28fd31d980e",
+            measurementId: "G-HCNRHLMFDT"
+        };
+
+        // Inicializa o Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app); // Para interagir com o Realtime Database
+
+        // Função para capturar e salvar a geolocalização
+        window.getAndSaveLocation = function() {
+            // Obtém o nome do funcionário
+            const name = document.getElementById("employeeName").value;
+
+            if (!name) {
+                alert("Por favor, insira o nome do funcionário.");
+                return;
+            }
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const latitude = position.coords.latitude;
+                    const longitude = position.coords.longitude;
+
+                    console.log(`Nome: ${name}, Latitude: ${latitude}, Longitude: ${longitude}`);
+
+                    // Salva a localização no Firebase, usando o nome como ID dinâmico
+                    const locationRef = ref(db, `locations/${name}`); // Usa o nome do funcionário como ID
+                    set(locationRef, {
+                        latitude: latitude,
+                        longitude: longitude
+                    }).then(() => {
+                        alert('Sua localização foi atualizada!');
+                    }).catch((error) => {
+                        alert('Erro ao salvar localização: ' + error.message);
+                    });
+                }, (error) => {
+                    alert("Erro ao obter geolocalização: " + error.message);
+                });
+            } else {
+                alert("Geolocalização não é suportada neste navegador.");
+            }
+        };
+    </script>
+</head>
+<body>
+    <h1>Solicitação de Geolocalização</h1>
+    
+    <!-- Campo para o funcionário inserir seu nome -->
+    <label for="employeeName">Nome do Funcionário:</label>
+    <input type="text" id="employeeName" placeholder="Digite seu nome" required>
+    <br><br>
+
+    <!-- Botão para solicitar a localização -->
+    <button onclick="getAndSaveLocation()">Compartilhar Localização</button>
+
+    <p>Aguarde enquanto a localização é solicitada e enviada para o servidor.</p>
+</body>
+</html>

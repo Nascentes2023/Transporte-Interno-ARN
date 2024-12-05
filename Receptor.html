@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Acompanhamento de Localização</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #f0f0f0;
+    }
+    h1 {
+      color: #0056b3;
+    }
+    #map {
+      width: 90%;
+      height: 500px;
+      margin: 20px 0;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+    }
+    #button-container {
+      margin: 10px;
+    }
+    #employee-list {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      background: #fff;
+      border-radius: 5px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .employee-item {
+      margin: 5px 0;
+    }
+  </style>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+  <!-- Google Maps -->
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCq1y3mAzmSSzDrdi6UDukRblU4naEH-lU&callback=initMap"
+    async
+    defer>
+  </script>
+</head>
+<body>
+  <h1>Acompanhamento de Localização</h1>
+  <div id="button-container">
+    <button onclick="toggleEmployeeList()">Selecionar Motoristas</button>
+    <button onclick="showLast5Km()">Exibir Últimos 5 km</button> <!-- Botão de exibição -->
+    <div id="employee-list"></div>
+  </div>
+  <div id="map"></div>
+
+  <script>
+    // Configuração do Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyC7SXI2hJ2GzrxIuig8UqX__Ml0rikst30",
+      authDomain: "transporte-interno.firebaseapp.com",
+      databaseURL: "https://transporte-interno-default-rtdb.firebaseio.com",
+      projectId: "transporte-interno",
+      storageBucket: "transporte-interno.firebasestorage.app",
+      messagingSenderId: "1034071655179",
+      appId: "1:1034071655179:web:1c24813857f28fd31d980e",
+      measurementId: "G-HCNRHLMFDT"
+    };
+
+    // Inicializar Firebase
+    const app = firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    let map;
+    const markers = {}; // Armazenar marcadores por funcionário
+    const paths = {}; // Armazenar as linhas (trajetos) por funcionário
+    const selectedEmployees = new Set(); // Motoristas selecionados
+    const employeeDistances = {}; // Distâncias percorridas pelos motoristas
+
+    // Função para inicializar o mapa
+    function initMap() {
+      const defaultLocation = { lat: -19.908748, lng: -43.938896 }; // Localização padrão
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: defaultLocation,
+        zoom: 12
+      });
+
+      // Definir o ícone do marcador (ônibus ou carro)
+      const customIcon = {
+        url: "onibus.png", // Ícone de ônibus
+        scaledSize: new google.maps.Size(40, 40) // Tamanho do ícone
+      };
+
+      // Monitorar atualizações de localização de todos os funcionários
+      monitorAllLocations(customIcon);
+    }
+
+    // Monitorar todas as localizações no Firebase
+    function monitorAllLocations(customIcon) {
+      const locationsRef = database.ref("locations");
+
+      // Listener para mudanças nos dados de localização
+      locationsRef.on("value", (snapshot) => {
+        const data = snapshot.val();
+        console.log("Dados recebidos do Firebase:", data);
+
+        if (data) {
+          const employeeListDiv = document.getElementById("employee-list");
+          employeeListDiv.innerHTML = ''; // Limpar lista antes de adicionar
+
+          Object.keys(data).forEach((employeeName) => {
+            const location = data[employeeName];
+            if (location.latitude && location.longitude) {
+              // Adicionar os motoristas à lista de seleção
+              const listItem = document.createElement("div");
+              listItem.classList.add("employee-item");
+
+              const checkbox = document.createElement("input");
+              checkbox.type = "checkbox";
+              checkbox.id = employeeName;
+              checkbox.checked = selectedEmployees.has(employeeName); // Checar se já foi selecionado
+
+              checkbox.addEventListener("change", (e) => {
+                if (e.target.checked) {
+                  selectedEmployees.add(employeeName);
+                  updateEmployeeLocation(employeeName, location, customIcon); // Atualizar localização
+                } else {
+                  selectedEmployees.delete(employeeName);
+                  removeEmployeeLocation(employeeName); // Remover o trajeto e o marcador
+                }
+              });
+
+              const label = document.createElement("label");
+              label.setAttribute("for", employeeName);
+              label.textContent = `Motorista: ${employeeName}`;
+
+              listItem.appendChild(checkbox);
+              listItem.appendChild(label);
+              employeeListDiv.appendChild(listItem);
+
+              // Adicionar marcador ao mapa se o motorista estiver compartilhando localização
+              if (selectedEmployees.has(employeeName)) {
+                updateEmployeeLocation(employeeName, location, customIcon);
+              }
+            } else {
+              // Remover marcador se a localização for inválida (motorista parou de compartilhar)
+              if (markers[employeeName]) {
+                markers[employeeName].setMap(null);
+                delete markers[employeeName]; // Remover o marcador da lista
+              }
+            }
+          });
+        } else {
+          console.warn("Nenhuma localização encontrada no Firebase.");
+        }
+      });
+    }
+
+    // Função para atualizar ou criar marcador e trajeto para cada funcionário
+    function updateEmployeeLocation(employeeName, location, customIcon) {
+      // Verificar se as coordenadas são válidas
+      if (typeof location.latitude !== 'number' || typeof location.longitude !== 'number' || isNaN(location.latitude) || isNaN(location.longitude)) {
+        console.error("Coordenadas inválidas para o motorista:", employeeName);
+        return;
+      }
+
+      const position = { lat: location.latitude, lng: location.longitude };
+
+      // Atualizar marcador
+      if (markers[employeeName]) {
+        markers[employeeName].setPosition(position);
+      } else {
+        markers[employeeName] = new google.maps.Marker({
+          position: position,
+          map: map,
+          icon: customIcon,
+          title: `Funcionário: ${employeeName}`
+        });
+      }
+
+      // Atualizar o trajeto
+      if (!paths[employeeName]) {
+        paths[employeeName] = new google.maps.Polyline({
+          path: [position], // Inicia o trajeto com o primeiro ponto
+          geodesic: true,
+          strokeColor: "#FF0000", // Cor da linha
+          strokeOpacity: 1.0,
+          strokeWeight: 2,
+          map: map
+        });
+      } else {
+        // Adiciona o novo ponto ao trajeto existente
+        const path = paths[employeeName].getPath();
+        path.push(position);
+      }
+
+      // Calcular a distância percorrida
+      if (!employeeDistances[employeeName]) {
+        employeeDistances[employeeName] = 0; // Inicializar a distância
+      }
+
+      // Calcular a distância entre os dois últimos pontos
+      const lastPath = paths[employeeName].getPath();
+      if (lastPath.getLength() > 1) {
+        const lastPoint = lastPath.getAt(lastPath.getLength() - 2); // Ponto anterior
+        const currentPoint = lastPath.getAt(lastPath.getLength() - 1); // Ponto atual
+
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(lastPoint, currentPoint);
+        employeeDistances[employeeName] += distance; // Atualiza a distância percorrida
+      }
+
+      // Ajustar o centro do mapa para acompanhar o funcionário
+      map.setCenter(position);
+    }
+
+    // Função para remover marcador e trajeto quando o motorista for desmarcado
+    function removeEmployeeLocation(employeeName) {
+      // Verificar se o marcador e o trajeto existem antes de tentar removê-los
+      if (markers[employeeName]) {
+        markers[employeeName].setMap(null); // Remove o marcador do mapa
+        delete markers[employeeName]; // Remove da lista de marcadores
+      }
+
+      if (paths[employeeName]) {
+        paths[employeeName].setMap(null); // Remove a linha do mapa
+        delete paths[employeeName]; // Remove da lista de trajetos
+      }
+
+      // Remover a distância calculada
+      delete employeeDistances[employeeName];
+    }
+
+    // Função para exibir os últimos 5 km percorridos
+    function showLast5Km() {
+      Object.keys(employeeDistances).forEach(employeeName => {
+        const totalDistance = employeeDistances[employeeName] || 0;
+        const last5Km = totalDistance >= 5000 ? 'Últimos 5 km: percorridos' : 'Ainda não completou 5 km';
+        alert(`${employeeName}: ${last5Km}`);
+      });
+    }
+
+    // Função para mostrar ou esconder a lista de motoristas
+    function toggleEmployeeList() {
+      const employeeListDiv = document.getElementById("employee-list");
+      employeeListDiv.style.display = employeeListDiv.style.display === "none" ? "block" : "none";
+    }
+
+  </script>
+</body>
+</html>
